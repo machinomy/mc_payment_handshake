@@ -1,0 +1,22 @@
+{
+  "name": "wt_ilp",
+  "version": "1.0.0",
+  "description": "ILP BitTorrent Protocol Extension",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ilp",
+    "interledger",
+    "bittorrent",
+    "webtorrent",
+    "micropayment"
+  ],
+  "author": "Evan Schwartz <evan@ripple.com>",
+  "license": "ISC",
+  "dependencies": {
+    "bencode": "^0.7.0",
+    "inherits": "^2.0.1"
+  }
+}
