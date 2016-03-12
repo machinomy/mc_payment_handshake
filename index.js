@@ -3,12 +3,14 @@
 const EventEmitter = require('events').EventEmitter
 const inherits = require('inherits')
 const bencode = require('bencode')
+const PaymentClient = require('./paymentClient').PaymentClient
+const BigNumber = require('bignumber.js')
 
 /**
  * Returns a bittorrent extension
- * @param {String} opts.account ILP ledger account URI
+ * @param {PaymentClient} opts.paymentClient Client for five-bells-wallet
  * @param {String} opts.price Amount to charge per chunk
- * @param {String} opts.token Token to identify payment
+ * @param {String} opts.license License or licensee details
  * @return {BitTorrent Extension}
  */
 module.exports = function (opts) {
@@ -21,23 +23,31 @@ module.exports = function (opts) {
   function wt_ilp (wire) {
     EventEmitter.call(this)
 
-    this._peerAccount = null
-    this._peerPrice = null
-    this._peerToken = null
-
     this._wire = wire
-    this._fetching = false
+    this._infoHash = null
 
-    // Seeder
-    if (opts.account && opts.price) {
-      this._wire.extendedHandshake.account = opts.account
-      this._wire.extendedHandshake.price = opts.price
-    }
+    this._paymentClient = opts.paymentClient
+    this._paymentClient.on('incoming', this._handlePaymentNotification.bind(this))
 
-    // Leecher
-    if (opts.token) {
-      this._wire.extendedHandshake.token = opts.token
-    }
+    this.account = this._paymentClient.account
+    this.price = new BigNumber(opts.price || 0)
+    this.license = opts.license
+    this.publicKey = opts.license.licensee_public_key
+
+    // Peer fields will be set once the extended handshake is received
+    this.peerAccount = null
+    this.peerPrice = null
+    this.peerLicense = null
+    this.peerPublicKey = null
+    this.peerBalance = new BigNumber(0)
+
+    // Add fields to extended handshake, which will be sent to peer
+    this._wire.extendedHandshake.ilp_license = this.license
+    this._wire.extendedHandshake.ilp_public_key = this.publicKey
+    this._wire.extendedHandshake.ilp_account = this.account
+    this._wire.extendedHandshake.ilp_price = this.price.toString()
+
+    this._setupInterceptRequests()
   }
 
   wt_ilp.prototype.name = 'wt_ilp'
@@ -51,20 +61,24 @@ module.exports = function (opts) {
       return this.emit('warning', new Error('Peer does not support wt_ilp'))
     }
 
-    // Sent from seeder
-    if (handshake.account && handshake.price) {
-      this._peerAccount = handshake.account.toString('utf8')
-      this._peerPrice = handshake.price.toString('utf8')
-
-      this._sendPayment()
+    if (handshake.ilp_account) {
+      this.peerAccount = handshake.ilp_account.toString('utf8')
+    }
+    if (handshake.ilp_price) {
+      this.peerPrice = new BigNumber(handshake.ilp_price.toString('utf8'))
+    }
+    if (handshake.ilp_public_key) {
+      this.peerPublicKey = handshake.ilp_public_key.toString('utf8')
+    }
+    if (handshake.ilp_license) {
+      const peerLicense = {}
+      Object.keys(handshake.ilp_license).forEach(function (key) {
+        peerLicense[key] = handshake.ilp_license[key].toString('utf8')
+      })
+      this.peerLicense = peerLicense
     }
 
-    // Sent from leecher
-    if (handshake.token) {
-      this._peerToken = handshake.token.toString('utf8')
-
-      this._checkToken(this._peerToken)
-    }
+    this._checkUnchoke()
   }
 
   wt_ilp.prototype.onMessage = function (buf) {
@@ -80,26 +94,21 @@ module.exports = function (opts) {
     }
     console.log('wt_ilp got message', dict)
     switch (dict.msg_type) {
-      // Request Payment
+      // Low Balance
       case 0:
-        console.log('wt_ilp got payment request')
-        this._send({
-          msg_type: 1,
-          account: this._account,
-          price: this._price
-        })
-        break
-      case 1:
-        console.log('wt_ilp got account details: ' + dict.account + ' ' + dict.price)
+        console.log('wt_ilp got low balance message', dict.bal)
+        this._sendPayment()
         break
     }
   }
 
   wt_ilp.prototype._forceChoke = function () {
+    console.log('force choke')
     this._wire.choke()
     this._wireUnchoke = this._wire.unchoke
     this._wire.unchoke = function () {
-      console.log('fake unchoke called')
+      // noop
+      // Other parts of the webtorrent code will try to unchoke it
     }
   }
 
@@ -110,26 +119,56 @@ module.exports = function (opts) {
     this._wire.unchoke()
   }
 
-  wt_ilp.prototype._checkToken = function () {
-    if (!this._peerToken) {
-      this._forceChoke()
+  wt_ilp.prototype._licenseIsValid = function () {
+
+    // TODO validate peer license against what we have
+
+    if (!this.peerLicense ||
+        this.peerLicense.content_hash !== this._infoHash) {
+      console.log('Invalid content_hash')
+      return false
     }
 
-    this._forceChoke()
-    const _this = this
-    console.log('checking balance')
-    setTimeout(function () {
-      console.log('unchoking')
-      _this._unchoke()
-    }, 3000)
+    // TODO check signature
+    if (!this.peerLicense.signature) {
+      console.log('Invalid signature')
+      return false
+    }
+
+    // TODO check expiry
+    if (!this.peerLicense.expires_at) {
+      console.log('Invalid expires_at')
+      return false
+    }
+
+    return true
+  }
+
+  wt_ilp.prototype._checkUnchoke = function () {
+    if (!this._licenseIsValid()) {
+      this._forceChoke()
+      return
+    }
+
+    if (this.price && this.peerBalance.lessThan(this.price)) {
+      console.log('choking because of low balance')
+      this._sendLowBalance()
+      this._forceChoke()
+      return
+    }
+
+    // if (this._wire.amChoking) {
+      this._unchoke()
+    // }
   }
 
   wt_ilp.prototype._sendPayment = function () {
-    console.log('send ' + this._peerPrice + ' to ' + this._peerAccount)
-  }
-
-  wt_ilp.prototype.cancel = function () {
-    this._fetching = false
+    // TODO determine if we should send a payment and how much
+    this._paymentClient.sendPayment({
+      destinationAmount: this.peerPrice.times(5).toString(),
+      destinationAccount: this.peerAccount,
+      destinationMemo: opts.license.licensee_public_key
+    })
   }
 
   wt_ilp.prototype._send = function (dict, trailer) {
@@ -138,6 +177,41 @@ module.exports = function (opts) {
       buf = Buffer.concat([buf, trailer])
     }
     this._wire.extended('wt_ilp', buf)
+  }
+
+  wt_ilp.prototype._sendLowBalance = function () {
+    console.log('peer has insufficient balance: ' + this.peerBalance.toString())
+    this._send({
+      msg_type: 0,
+      bal: this.peerBalance.toString()
+    })
+  }
+
+  wt_ilp.prototype._handlePaymentNotification = function (transfer) {
+    // Check if this payment was actually for us and from this peer
+    if (transfer.credits[0].account === this._paymentClient.account &&
+        transfer.credits[0].memo === this.peerPublicKey) {
+
+      this.peerBalance = this.peerBalance.plus(transfer.credits[0].amount)
+      console.log('Crediting peer for payment of ' + transfer.credits[0].amount + ' balance now: ' + this.peerBalance)
+      this._checkUnchoke()
+    }
+  }
+
+  // Before sending requests we want to make sure the peer has
+  // sufficient funds with us and then charge them for the request
+  wt_ilp.prototype._setupInterceptRequests = function () {
+    const _this = this
+    const _onRequest = this._wire._onRequest
+    this._wire._onRequest = function () {
+      _this._checkUnchoke()
+      if (!_this._wire.amChoking) {
+        // Charge for chunk and send request
+        console.log('Charging peer ' + _this.price.toString() + ' for chunk')
+        _this.peerBalance = _this.peerBalance.minus(_this.price)
+        _onRequest.apply(_this._wire, arguments)
+      }
+    }
   }
 
   return wt_ilp
