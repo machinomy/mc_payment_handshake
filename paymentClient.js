@@ -28,6 +28,7 @@ PaymentClient.prototype.connect = function () {
   const _this = this
   console.log('Attempting to connect to wallet: ' + this.walletUri + '/socket.io')
   this.socket = socket(this.walletUri, { path: '/api/socket.io' })
+  this.socket.emit('unsubscribe', _this.username)
   this.socket.emit('subscribe', _this.username)
   this.socket.on('connect', function () {
     console.log('Connected to wallet API socket.io')

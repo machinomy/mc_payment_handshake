@@ -28,6 +28,8 @@ module.exports = function (opts) {
 
     this._paymentClient = opts.paymentClient
     this._paymentClient.on('incoming', this._handlePaymentNotification.bind(this))
+    // Cache the transfer ids we've seen so we don't double credit incoming payments
+    this._seenTransferIds = {}
 
     this.account = this._paymentClient.account
     this.price = new BigNumber(opts.price || 0)
@@ -191,6 +193,12 @@ module.exports = function (opts) {
   }
 
   wt_ilp.prototype._handlePaymentNotification = function (transfer) {
+    if (this._seenTransferIds[transfer.id]) {
+      return
+    } else {
+      this._seenTransferIds[transfer.id] = true
+    }
+
     // Check if this payment was actually for us and from this peer
     if (transfer.credits[0].account !== this._paymentClient.account) {
       return
@@ -212,7 +220,7 @@ module.exports = function (opts) {
         memo.content_hash === this._infoHash) {
 
       this.peerBalance = this.peerBalance.plus(transfer.credits[0].amount)
-      console.log('Crediting peer for payment of ' + transfer.credits[0].amount + ' balance now: ' + this.peerBalance)
+      console.log('Crediting peer for payment of ' + transfer.credits[0].amount + ' balance now: ' + this.peerBalance + ' (transfer id: ' + transfer.id + ')')
       this._checkUnchoke()
     } else {
       console.log('Got unrelated payment notification')
