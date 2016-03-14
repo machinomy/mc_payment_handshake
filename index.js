@@ -3,12 +3,11 @@
 const EventEmitter = require('events').EventEmitter
 const inherits = require('inherits')
 const bencode = require('bencode')
-const PaymentClient = require('./paymentClient').PaymentClient
 const BigNumber = require('bignumber.js')
 
 /**
  * Returns a bittorrent extension
- * @param {PaymentClient} opts.paymentClient Client for five-bells-wallet
+ * @param {PaymentManager} opts.paymentManager Client for five-bells-wallet
  * @param {String} opts.price Amount to charge per chunk
  * @param {String} opts.license License or licensee details
  * @return {BitTorrent Extension}
@@ -26,12 +25,12 @@ module.exports = function (opts) {
     this._wire = wire
     this._infoHash = null
 
-    this._paymentClient = opts.paymentClient
-    this._paymentClient.on('incoming', this._handlePaymentNotification.bind(this))
+    this._paymentManager = opts.paymentManager
+    this._paymentManager.on('incoming', this._handlePaymentNotification.bind(this))
     // Cache the transfer ids we've seen so we don't double credit incoming payments
     this._seenTransferIds = {}
 
-    this.account = this._paymentClient.account
+    this.account = this._paymentManager.account
     this.price = new BigNumber(opts.price || 0)
     this.license = opts.license
     this.publicKey = opts.license.licensee_public_key
@@ -164,7 +163,7 @@ module.exports = function (opts) {
 
   wt_ilp.prototype._sendPayment = function () {
     // TODO determine if we should send a payment and how much
-    this._paymentClient.sendPayment({
+    this._paymentManager.sendPayment({
       destinationAmount: this.peerPrice.times(5).toString(),
       destinationAccount: this.peerAccount,
       // TODO make the condition dependent on the memo to ensure that it can't be changed
@@ -200,7 +199,7 @@ module.exports = function (opts) {
     }
 
     // Check if this payment was actually for us and from this peer
-    if (transfer.credits[0].account !== this._paymentClient.account) {
+    if (transfer.credits[0].account !== this._paymentManager.account) {
       return
     }
 
@@ -240,7 +239,7 @@ module.exports = function (opts) {
         console.log('Charging peer ' + _this.price.toString() + ' for chunk. Balance now: ' + _this.peerBalance.toString())
         _onRequest.apply(_this._wire, arguments)
       } else {
-        // console.log('Blocking request because we are choking peer', arguments)
+        console.log('Blocking request because we are choking peer', arguments)
       }
     }
   }
