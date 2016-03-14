@@ -52,15 +52,20 @@ PaymentClient.prototype.connect = function () {
   })
 }
 
+PaymentClient.prototype.disconnect = function () {
+  this.socket.emit('unsubscribe', this.username)
+}
+
 PaymentClient.prototype.sendPayment = function (params) {
   params.sourceAccount = this.account
   params.sourcePassword = this.password
-  sendPayment(params).then(function (result) {
-    console.log('Sent payment: ', result)
-  })
-  .catch(function (err) {
-    console.log('Error sending payment: ', err)
-  })
+  sendPayment(params)
+    .then(function (result) {
+      console.log('Sent payment: ', result)
+    })
+    .catch(function (err) {
+      console.log('Error sending payment: ', (err && err.response && err.response.body ? err.response.body : err))
+    })
 }
 
 exports.PaymentClient = PaymentClient

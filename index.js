@@ -92,11 +92,10 @@ module.exports = function (opts) {
       // drop invalid messages
       return
     }
-    console.log('wt_ilp got message', dict)
     switch (dict.msg_type) {
       // Low Balance
       case 0:
-        console.log('wt_ilp got low balance message', dict.bal)
+        console.log('wt_ilp got low balance message', dict.bal.toString('utf8'))
         this._sendPayment()
         break
     }
@@ -115,6 +114,7 @@ module.exports = function (opts) {
   wt_ilp.prototype._unchoke = function () {
     if (this._wireUnchoke) {
       this._wire.unchoke = this._wireUnchoke
+      this._wireUnchoke = null
     }
     this._wire.unchoke()
   }
@@ -157,9 +157,7 @@ module.exports = function (opts) {
       return
     }
 
-    // if (this._wire.amChoking) {
-      this._unchoke()
-    // }
+    this._unchoke()
   }
 
   wt_ilp.prototype._sendPayment = function () {
@@ -167,7 +165,12 @@ module.exports = function (opts) {
     this._paymentClient.sendPayment({
       destinationAmount: this.peerPrice.times(5).toString(),
       destinationAccount: this.peerAccount,
-      destinationMemo: opts.license.licensee_public_key
+      // TODO make the condition dependent on the memo to ensure that it can't be changed
+      // TODO don't stringify the memo once https://github.com/interledger/five-bells-shared/pull/111 is merged
+      destinationMemo: JSON.stringify({
+        content_hash: this._infoHash,
+        public_key: opts.license.licensee_public_key,
+      })
     })
   }
 
@@ -180,7 +183,7 @@ module.exports = function (opts) {
   }
 
   wt_ilp.prototype._sendLowBalance = function () {
-    console.log('peer has insufficient balance: ' + this.peerBalance.toString())
+    console.log('Peer has insufficient balance: ' + this.peerBalance.toString())
     this._send({
       msg_type: 0,
       bal: this.peerBalance.toString()
@@ -189,12 +192,30 @@ module.exports = function (opts) {
 
   wt_ilp.prototype._handlePaymentNotification = function (transfer) {
     // Check if this payment was actually for us and from this peer
-    if (transfer.credits[0].account === this._paymentClient.account &&
-        transfer.credits[0].memo === this.peerPublicKey) {
+    if (transfer.credits[0].account !== this._paymentClient.account) {
+      return
+    }
+
+    // TODO don't check for string memos once https://github.com/interledger/five-bells-shared/pull/111 is merged
+    let memo
+    if (typeof transfer.credits[0].memo === 'string') {
+      try {
+        memo = JSON.parse(transfer.credits[0].memo)
+      } catch (e) {
+        console.log('Malformed memo', memo)
+      }
+    } else if (typeof transfer.credits[0].memo === object) {
+      memo = transfer.credits[0].memo
+    }
+
+    if (memo.public_key === this.peerPublicKey &&
+        memo.content_hash === this._infoHash) {
 
       this.peerBalance = this.peerBalance.plus(transfer.credits[0].amount)
       console.log('Crediting peer for payment of ' + transfer.credits[0].amount + ' balance now: ' + this.peerBalance)
       this._checkUnchoke()
+    } else {
+      console.log('Got unrelated payment notification')
     }
   }
 
@@ -207,9 +228,11 @@ module.exports = function (opts) {
       _this._checkUnchoke()
       if (!_this._wire.amChoking) {
         // Charge for chunk and send request
-        console.log('Charging peer ' + _this.price.toString() + ' for chunk')
         _this.peerBalance = _this.peerBalance.minus(_this.price)
+        console.log('Charging peer ' + _this.price.toString() + ' for chunk. Balance now: ' + _this.peerBalance.toString())
         _onRequest.apply(_this._wire, arguments)
+      } else {
+        // console.log('Blocking request because we are choking peer', arguments)
       }
     }
   }
