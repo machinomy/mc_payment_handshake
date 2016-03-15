@@ -25,15 +25,14 @@ module.exports = function (opts) {
     this._wire = wire
     this._infoHash = null
 
-    this._paymentManager = opts.paymentManager
-    this._paymentManager.on('incoming', this._handlePaymentNotification.bind(this))
-    // Cache the transfer ids we've seen so we don't double credit incoming payments
-    this._seenTransferIds = {}
-
-    this.account = this._paymentManager.account
     this.price = new BigNumber(opts.price || 0)
     this.license = opts.license
     this.publicKey = opts.license.licensee_public_key
+    this._paymentManager = opts.paymentManager
+    this.account = this._paymentManager.account
+    if (!this.account) {
+      throw new Error('wt_ilp instantiated before PaymentManager was ready')
+    }
 
     // Peer fields will be set once the extended handshake is received
     this.peerAccount = null
@@ -48,6 +47,7 @@ module.exports = function (opts) {
     this._wire.extendedHandshake.ilp_account = this.account
     this._wire.extendedHandshake.ilp_price = this.price.toString()
 
+    this._forceChoke()
     this._setupInterceptRequests()
   }
 
@@ -79,7 +79,9 @@ module.exports = function (opts) {
       this.peerLicense = peerLicense
     }
 
-    this._checkUnchoke()
+    if (this._paymentManager.ready && this._licenseIsValid()) {
+      this._unchoke()
+    }
   }
 
   wt_ilp.prototype.onMessage = function (buf) {
@@ -97,7 +99,16 @@ module.exports = function (opts) {
       // Low Balance
       case 0:
         console.log('wt_ilp got low balance message', dict.bal.toString('utf8'))
-        this._sendPayment()
+        this._paymentManager.handlePaymentRequest({
+          peerPublicKey: this.peerPublicKey,
+          destinationAmount: this.peerPrice.times(5).toString(),
+          destinationAccount: this.peerAccount,
+          // TODO make the condition dependent on the memo to ensure that it can't be changed
+          // TODO don't stringify the memo once https://github.com/interledger/five-bells-shared/pull/111 is merged
+          destinationMemo: JSON.stringify({
+            public_key: opts.license.licensee_public_key,
+          })
+        })
         break
     }
   }
@@ -113,6 +124,7 @@ module.exports = function (opts) {
   }
 
   wt_ilp.prototype._unchoke = function () {
+    console.log('_unchoke')
     if (this._wireUnchoke) {
       this._wire.unchoke = this._wireUnchoke
       this._wireUnchoke = null
@@ -126,7 +138,7 @@ module.exports = function (opts) {
 
     if (!this.peerLicense ||
         this.peerLicense.content_hash !== this._infoHash) {
-      console.log('Invalid content_hash')
+      console.log('Invalid content_hash. Actual: ' + this.peerLicense.content_hash + '. Expected: ' + this._infoHash)
       return false
     }
 
@@ -145,36 +157,6 @@ module.exports = function (opts) {
     return true
   }
 
-  wt_ilp.prototype._checkUnchoke = function () {
-    if (!this._licenseIsValid()) {
-      this._forceChoke()
-      return
-    }
-
-    if (this.price && this.peerBalance.lessThan(this.price)) {
-      console.log('choking because of low balance')
-      this._sendLowBalance()
-      this._forceChoke()
-      return
-    }
-
-    this._unchoke()
-  }
-
-  wt_ilp.prototype._sendPayment = function () {
-    // TODO determine if we should send a payment and how much
-    this._paymentManager.sendPayment({
-      destinationAmount: this.peerPrice.times(5).toString(),
-      destinationAccount: this.peerAccount,
-      // TODO make the condition dependent on the memo to ensure that it can't be changed
-      // TODO don't stringify the memo once https://github.com/interledger/five-bells-shared/pull/111 is merged
-      destinationMemo: JSON.stringify({
-        content_hash: this._infoHash,
-        public_key: opts.license.licensee_public_key,
-      })
-    })
-  }
-
   wt_ilp.prototype._send = function (dict, trailer) {
     var buf = bencode.encode(dict)
     if (Buffer.isBuffer(trailer)) {
@@ -184,46 +166,11 @@ module.exports = function (opts) {
   }
 
   wt_ilp.prototype._sendLowBalance = function () {
-    console.log('Peer has insufficient balance: ' + this.peerBalance.toString())
+    const peerBalance = this._paymentManager.getBalance(this.peerPublicKey)
     this._send({
       msg_type: 0,
-      bal: this.peerBalance.toString()
+      bal: peerBalance.toString()
     })
-  }
-
-  wt_ilp.prototype._handlePaymentNotification = function (transfer) {
-    if (this._seenTransferIds[transfer.id]) {
-      return
-    } else {
-      this._seenTransferIds[transfer.id] = true
-    }
-
-    // Check if this payment was actually for us and from this peer
-    if (transfer.credits[0].account !== this._paymentManager.account) {
-      return
-    }
-
-    // TODO don't check for string memos once https://github.com/interledger/five-bells-shared/pull/111 is merged
-    let memo
-    if (typeof transfer.credits[0].memo === 'string') {
-      try {
-        memo = JSON.parse(transfer.credits[0].memo)
-      } catch (e) {
-        console.log('Malformed memo', memo)
-      }
-    } else if (typeof transfer.credits[0].memo === object) {
-      memo = transfer.credits[0].memo
-    }
-
-    if (memo.public_key === this.peerPublicKey &&
-        memo.content_hash === this._infoHash) {
-
-      this.peerBalance = this.peerBalance.plus(transfer.credits[0].amount)
-      console.log('Crediting peer for payment of ' + transfer.credits[0].amount + ' balance now: ' + this.peerBalance + ' (transfer id: ' + transfer.id + ')')
-      this._checkUnchoke()
-    } else {
-      console.log('Got unrelated payment notification')
-    }
   }
 
   // Before sending requests we want to make sure the peer has
@@ -232,14 +179,27 @@ module.exports = function (opts) {
     const _this = this
     const _onRequest = this._wire._onRequest
     this._wire._onRequest = function () {
-      _this._checkUnchoke()
-      if (!_this._wire.amChoking) {
-        // Charge for chunk and send request
-        _this.peerBalance = _this.peerBalance.minus(_this.price)
-        console.log('Charging peer ' + _this.price.toString() + ' for chunk. Balance now: ' + _this.peerBalance.toString())
-        _onRequest.apply(_this._wire, arguments)
+      if (_this._paymentManager.ready && _this._licenseIsValid()) {
+        const peerHasSufficientBalance = _this._paymentManager.hasSufficientBalance({
+          peerPublicKey: _this.peerPublicKey,
+          contentHash: _this._infoHash,
+        })
+        if (peerHasSufficientBalance) {
+          _this._unchoke()
+        } else {
+          _this._sendLowBalance()
+          _this._forceChoke()
+        }
       } else {
-        console.log('Blocking request because we are choking peer', arguments)
+        _this._forceChoke()
+      }
+
+      if (!_this._wire.amChoking) {
+        _this._paymentManager.chargeRequest.call(_this._paymentManager, {
+          peerPublicKey: _this.peerPublicKey,
+          contentHash: _this._infoHash,
+        })
+        _onRequest.apply(_this._wire, arguments)
       }
     }
   }
