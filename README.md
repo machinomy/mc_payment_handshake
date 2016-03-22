@@ -37,3 +37,8 @@ And the fields provided by the creator:
 * Should we use public key hash instead of public key?
 * Should we use ed25519 or RSA?
 * Is listing the price per unit of time for the license the best way to do it? Should there be a fixed price, or a price schedule?
+* How do we handle different valid licenses?
+
+
+Should the license, creator account and public key be in the info? Then it would be included in the hash
+Then you would just need to send the "exires_at", "licensee_public_key" and signature
