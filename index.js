@@ -38,6 +38,8 @@ module.exports = function (opts) {
     this.peerPublicKey = null
     this.peerBalance = new BigNumber(0)
 
+    this.amForceChoking = false
+
     // Add fields to extended handshake, which will be sent to peer
     this._wire.extendedHandshake.ilp_public_key = this.publicKey
     this._wire.extendedHandshake.ilp_account = this.account
@@ -90,42 +92,36 @@ module.exports = function (opts) {
       return
     }
     debug('wt_ilp onMessage', dict)
-    // switch (dict.msg_type) {
-    //   // Low Balance
-    //   case 0:
-    //     debug('wt_ilp got low balance message', dict.bal.toString('utf8'))
-    //     this._paymentManager.handlePaymentRequest({
-    //       peerPublicKey: this.peerPublicKey,
-    //       destinationAmount: this.peerPrice.times(5).toString(),
-    //       destinationAccount: this.peerAccount,
-    //       // TODO make the condition dependent on the memo to ensure that it can't be changed
-    //       // TODO don't stringify the memo once https://github.com/interledger/five-bells-shared/pull/111 is merged
-    //       destinationMemo: {
-    //         public_key: opts.license.licensee_public_key,
-    //       }
-    //     })
-    //     break
-    // }
+    switch (dict.msg_type) {
+      // request for funds
+      // { msg_type: 0, balance: 0 }
+      case 0:
+        const balance = Buffer.isBuffer(dict.balance) ? dict.balance.toString('utf8') : '0'
+        this.emit('payment_request', balance)
+        break
+    }
   }
 
   wt_ilp.prototype.forceChoke = function () {
     debug('force choke')
+    this.amForceChoking = true
     this._wire.choke()
-    this._wireUnchoke = this._wire.unchoke
-    this._wire.unchoke = function () {
-      debug('fake unchoke called')
-      // noop
-      // Other parts of the webtorrent code will try to unchoke it
-    }
+    // this._wireUnchoke = this._wire.unchoke
+    // this._wire.unchoke = function () {
+    //   debug('fake unchoke called')
+    //   // noop
+    //   // Other parts of the webtorrent code will try to unchoke it
+    // }
   }
 
   wt_ilp.prototype.unchoke = function () {
     debug('unchoke')
-    if (this._wireUnchoke) {
-      this._wire.unchoke = this._wireUnchoke
-      this._wireUnchoke = null
-    }
-    this._wire.unchoke()
+    this.amForceChoking = false
+    // if (this._wireUnchoke) {
+    //   this._wire.unchoke = this._wireUnchoke
+    //   this._wireUnchoke = null
+    // }
+    // this._wire.unchoke()
   }
 
   wt_ilp.prototype._interceptRequests = function () {
@@ -133,7 +129,11 @@ module.exports = function (opts) {
     const _onRequest = this._wire._onRequest
     this._wire._onRequest = function () {
       _this.emit('request', arguments)
-      _onRequest.apply(_this._wire, arguments)
+      if (!this.amForceChoking) {
+        _onRequest.apply(_this._wire, arguments)
+      } else {
+        debug('force choking peer, dropping request')
+      }
     }
   }
 
@@ -146,14 +146,13 @@ module.exports = function (opts) {
     this._wire.extended('wt_ilp', buf)
   }
 
-  // wt_ilp.prototype._sendLowBalance = function () {
-  //   const peerBalance = this._paymentManager.getBalance(this.peerPublicKey)
-  //   debug('Sending low balance notification. Peer ' + this.peerPublicKey + ' has balance: ' + peerBalance)
-  //   this._send({
-  //     msg_type: 0,
-  //     bal: peerBalance.toString()
-  //   })
-  // }
+  wt_ilp.prototype.sendLowBalance = function (balance) {
+    debug('Sending low balance notification. Peer ' + this.peerPublicKey + ' has balance: ' + balance)
+    this._send({
+      msg_type: 0,
+      balance: balance
+    })
+  }
 
   // // Before sending requests we want to make sure the peer has
   // // sufficient funds with us and then charge them for the request
