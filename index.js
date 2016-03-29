@@ -91,7 +91,6 @@ module.exports = function (opts) {
       // drop invalid messages
       return
     }
-    debug('wt_ilp onMessage', dict)
     switch (dict.msg_type) {
       // request for funds
       // { msg_type: 0, balance: 0 }
@@ -103,7 +102,7 @@ module.exports = function (opts) {
   }
 
   wt_ilp.prototype.forceChoke = function () {
-    debug('force choke')
+    debug('force choke peer' + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0,8) + ')' : ''))
     this.amForceChoking = true
     this._wire.choke()
     // this._wireUnchoke = this._wire.unchoke
@@ -115,7 +114,7 @@ module.exports = function (opts) {
   }
 
   wt_ilp.prototype.unchoke = function () {
-    debug('unchoke')
+    debug('unchoke' + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0,8) + ')' : ''))
     this.amForceChoking = false
     // if (this._wireUnchoke) {
     //   this._wire.unchoke = this._wireUnchoke
@@ -127,8 +126,8 @@ module.exports = function (opts) {
   wt_ilp.prototype._interceptRequests = function () {
     const _this = this
     const _onRequest = this._wire._onRequest
-    this._wire._onRequest = function () {
-      _this.emit('request', arguments)
+    this._wire._onRequest = function (index, offset, length) {
+      _this.emit('request', length)
       if (!this.amForceChoking) {
         _onRequest.apply(_this._wire, arguments)
       } else {
@@ -147,43 +146,11 @@ module.exports = function (opts) {
   }
 
   wt_ilp.prototype.sendLowBalance = function (balance) {
-    debug('Sending low balance notification. Peer ' + this.peerPublicKey + ' has balance: ' + balance)
     this._send({
       msg_type: 0,
       balance: balance
     })
   }
-
-  // // Before sending requests we want to make sure the peer has
-  // // sufficient funds with us and then charge them for the request
-  // wt_ilp.prototype._setupInterceptRequests = function () {
-  //   const _this = this
-  //   const _onRequest = this._wire._onRequest
-  //   this._wire._onRequest = function () {
-  //     if (_this._paymentManager.ready && _this._licenseIsValid()) {
-  //       const peerHasSufficientBalance = _this._paymentManager.hasSufficientBalance({
-  //         peerPublicKey: _this.peerPublicKey,
-  //         contentHash: _this._infoHash,
-  //       })
-  //       if (peerHasSufficientBalance) {
-  //         _this._unchoke()
-  //       } else {
-  //         _this._sendLowBalance()
-  //         _this._forceChoke()
-  //       }
-  //     } else {
-  //       _this._forceChoke()
-  //     }
-
-  //     if (!_this._wire.amChoking) {
-  //       _this._paymentManager.chargeRequest.call(_this._paymentManager, {
-  //         peerPublicKey: _this.peerPublicKey,
-  //         contentHash: _this._infoHash,
-  //       })
-  //       _onRequest.apply(_this._wire, arguments)
-  //     }
-  //   }
-  // }
 
   return wt_ilp
 }
