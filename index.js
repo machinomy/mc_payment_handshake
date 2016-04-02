@@ -133,11 +133,17 @@ module.exports = function (opts) {
     const _onRequest = this._wire._onRequest
     this._wire._onRequest = function (index, offset, length) {
       _this.emit('request', length)
-      if (!this.amForceChoking) {
-        _onRequest.apply(_this._wire, arguments)
-      } else {
-        debug('force choking peer, dropping request')
-      }
+
+      // Call onRequest after the handlers triggered by this event have been called
+      const _arguments = arguments
+      setTimeout(function () {
+        if (!this.amForceChoking) {
+          debug('responding to request')
+          _onRequest.apply(_this._wire, _arguments)
+        } else {
+          debug('force choking peer, dropping request')
+        }
+      }, 0)
     }
   }
 
