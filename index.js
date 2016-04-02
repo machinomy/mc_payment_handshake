@@ -91,13 +91,17 @@ module.exports = function (opts) {
       // drop invalid messages
       return
     }
+    const amount = Buffer.isBuffer(dict.amount) ? dict.amount.toString('utf8') : 0
     switch (dict.msg_type) {
       // request for funds (denominated in the peer's ledger's asset)
       // { msg_type: 0, amount: 10 }
       case 0:
-        const amount = Buffer.isBuffer(dict.amount) ? dict.amount.toString('utf8') : '0'
         debug('Got payment request for: ' + amount + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0, 8) + ')' : ''))
         this.emit('payment_request', amount)
+        break
+      case 1:
+        debug('Peer is complaining that the price is too high, suggested price: ' + amount)
+        this.emit('payment_request_too_high', amount)
         break
     }
   }
@@ -146,9 +150,20 @@ module.exports = function (opts) {
   }
 
   wt_ilp.prototype.sendPaymentRequest = function (amount) {
-    debug('Send payment request for: ' + amount + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0, 8) + ')' : ''))
+    debug('Send payment request for: ' + amount.toString() + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0, 8) + ')' : ''))
     this._send({
       msg_type: 0,
+      amount: amount.toString()
+    })
+  }
+
+  wt_ilp.prototype.sendPaymentRequestTooHigh = function (amount) {
+    if (!amount) {
+      amount = 0
+    }
+    debug('Telling peer price is too high, suggesting price: ' + amount.toString())
+    this._send({
+      msg_type: 1,
       amount: amount.toString()
     })
   }
