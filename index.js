@@ -64,6 +64,7 @@ module.exports = function (opts) {
     if (handshake.ilp_account) {
       this.peerAccount = handshake.ilp_account.toString('utf8')
     }
+    // TODO remove price from handshake if the requests are going to be explicit
     if (handshake.ilp_price) {
       this.peerPrice = new BigNumber(handshake.ilp_price.toString('utf8'))
     }
@@ -91,12 +92,14 @@ module.exports = function (opts) {
       // drop invalid messages
       return
     }
+    debug('onMessage', dict)
     switch (dict.msg_type) {
-      // request for funds
-      // { msg_type: 0, balance: 0 }
+      // request for funds (denominated in the peer's ledger's asset)
+      // { msg_type: 0, amount: 10 }
       case 0:
-        const balance = Buffer.isBuffer(dict.balance) ? dict.balance.toString('utf8') : '0'
-        this.emit('payment_request', balance)
+        const amount = Buffer.isBuffer(dict.amount) ? dict.amount.toString('utf8') : '0'
+        debug('Got payment request for: ' + amount + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0,8) + ')' : ''))
+        this.emit('payment_request', amount)
         break
     }
   }
@@ -145,10 +148,11 @@ module.exports = function (opts) {
     this._wire.extended('wt_ilp', buf)
   }
 
-  wt_ilp.prototype.sendLowBalance = function (balance) {
+  wt_ilp.prototype.sendPaymentRequest = function (amount) {
+    debug('Send payment request for: ' + amount + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0,8) + ')' : ''))
     this._send({
       msg_type: 0,
-      balance: balance
+      amount: amount.toString()
     })
   }
 
