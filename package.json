@@ -4,7 +4,8 @@
   "description": "ILP BitTorrent Protocol Extension",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "npm run standard"
   },
   "keywords": [
     "ilp",
@@ -20,5 +21,8 @@
     "bignumber.js": "^2.3.0",
     "debug": "^2.2.0",
     "inherits": "^2.0.1"
+  },
+  "devDependencies": {
+    "standard": "^6.0.8"
   }
 }

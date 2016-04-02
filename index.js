@@ -82,30 +82,28 @@ module.exports = function (opts) {
   }
 
   wt_ilp.prototype.onMessage = function (buf) {
-    let dict, trailer
+    let dict
     try {
       const str = buf.toString()
       const trailerIndex = str.indexOf('ee') + 2
       dict = bencode.decode(str.substring(0, trailerIndex))
-      trailer = buf.slice(trailerIndex)
     } catch (err) {
       // drop invalid messages
       return
     }
-    debug('onMessage', dict)
     switch (dict.msg_type) {
       // request for funds (denominated in the peer's ledger's asset)
       // { msg_type: 0, amount: 10 }
       case 0:
         const amount = Buffer.isBuffer(dict.amount) ? dict.amount.toString('utf8') : '0'
-        debug('Got payment request for: ' + amount + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0,8) + ')' : ''))
+        debug('Got payment request for: ' + amount + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0, 8) + ')' : ''))
         this.emit('payment_request', amount)
         break
     }
   }
 
   wt_ilp.prototype.forceChoke = function () {
-    debug('force choke peer' + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0,8) + ')' : ''))
+    debug('force choke peer' + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0, 8) + ')' : ''))
     this.amForceChoking = true
     this._wire.choke()
     // this._wireUnchoke = this._wire.unchoke
@@ -117,7 +115,7 @@ module.exports = function (opts) {
   }
 
   wt_ilp.prototype.unchoke = function () {
-    debug('unchoke' + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0,8) + ')' : ''))
+    debug('unchoke' + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0, 8) + ')' : ''))
     this.amForceChoking = false
     // if (this._wireUnchoke) {
     //   this._wire.unchoke = this._wireUnchoke
@@ -139,7 +137,6 @@ module.exports = function (opts) {
     }
   }
 
-
   wt_ilp.prototype._send = function (dict, trailer) {
     var buf = bencode.encode(dict)
     if (Buffer.isBuffer(trailer)) {
@@ -149,7 +146,7 @@ module.exports = function (opts) {
   }
 
   wt_ilp.prototype.sendPaymentRequest = function (amount) {
-    debug('Send payment request for: ' + amount + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0,8) + ')' : ''))
+    debug('Send payment request for: ' + amount + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0, 8) + ')' : ''))
     this._send({
       msg_type: 0,
       amount: amount.toString()
