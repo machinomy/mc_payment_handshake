@@ -137,7 +137,7 @@ module.exports = function (opts) {
       // Call onRequest after the handlers triggered by this event have been called
       const _arguments = arguments
       setTimeout(function () {
-        if (!this.amForceChoking) {
+        if (!_this.amForceChoking) {
           debug('responding to request')
           _onRequest.apply(_this._wire, _arguments)
         } else {
