@@ -3,14 +3,13 @@
 const EventEmitter = require('events').EventEmitter
 const inherits = require('inherits')
 const bencode = require('bencode')
-const BigNumber = require('bignumber.js')
 const debug = require('debug')('wt_ilp')
 
 /**
  * Returns a bittorrent extension
  * @param {String} opts.account Address of five-bells-wallet
- * @param {String} opts.price Amount to charge per chunk
  * @param {String} opts.publicKey Ed25519 public key
+ * @param {String} [opts.license] payment-license
  * @return {BitTorrent Extension}
  */
 module.exports = function (opts) {
@@ -28,22 +27,30 @@ module.exports = function (opts) {
     this._wire = wire
     this._infoHash = null
 
-    this.price = new BigNumber(opts.price || 0)
     this.publicKey = opts.publicKey
     this.account = opts.account
+    this.license = opts.license
+
+    if (!this.publicKey) {
+      throw new Error('Must instantiate wt_ilp with a publicKey')
+    }
+    if (!this.account) {
+      throw new Error('Must instantiate wt_ilp with an ILP account')
+    }
 
     // Peer fields will be set once the extended handshake is received
     this.peerAccount = null
-    this.peerPrice = null
     this.peerPublicKey = null
-    this.peerBalance = new BigNumber(0)
+    this.peerLicense = null
 
     this.amForceChoking = false
 
     // Add fields to extended handshake, which will be sent to peer
     this._wire.extendedHandshake.ilp_public_key = this.publicKey
     this._wire.extendedHandshake.ilp_account = this.account
-    this._wire.extendedHandshake.ilp_price = this.price.toString()
+    if (this.license) {
+      this._wire.extendedHandshake.ilp_license = this.license
+    }
 
     debug('Extended handshake to send:', this._wire.extendedHandshake)
 
@@ -54,6 +61,11 @@ module.exports = function (opts) {
 
   wt_ilp.prototype.onHandshake = function (infoHash, peerId, extensions) {
     this._infoHash = infoHash
+
+    if (!extensions.extended) {
+      // Peer does not support extensions
+      this._wire.destroy()
+    }
   }
 
   wt_ilp.prototype.onExtendedHandshake = function (handshake) {
@@ -64,21 +76,18 @@ module.exports = function (opts) {
     if (handshake.ilp_account) {
       this.peerAccount = handshake.ilp_account.toString('utf8')
     }
-    // TODO remove price from handshake if the requests are going to be explicit
-    if (handshake.ilp_price) {
-      this.peerPrice = new BigNumber(handshake.ilp_price.toString('utf8'))
-    }
     if (handshake.ilp_public_key) {
       this.peerPublicKey = handshake.ilp_public_key.toString('utf8')
+    }
+    if (handshake.ilp_license) {
+      this.peerLicense = handshake.ilp_license.toString('utf8')
     }
 
     this.emit('ilp_handshake', {
       account: this.peerAccount,
-      price: this.peerPrice,
-      publicKey: this.peerPublicKey
+      publicKey: this.peerPublicKey,
+      license: this.peerLicense
     })
-
-    // this._unchoke()
   }
 
   wt_ilp.prototype.onMessage = function (buf) {
@@ -103,6 +112,15 @@ module.exports = function (opts) {
         debug('Peer is complaining that the price is too high, suggested price: ' + amount)
         this.emit('payment_request_too_high', amount)
         break
+      case 2:
+        const license = dict.license.toString('utf8')
+        debug('Got peer license: ' + dict.license.toString('utf8'))
+        this.peerLicense = license
+        this.emit('license', license)
+        break
+      default:
+        debug('Got unknown message: ', dict)
+        break
     }
   }
 
@@ -110,22 +128,11 @@ module.exports = function (opts) {
     debug('force choke peer' + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0, 8) + ')' : ''))
     this.amForceChoking = true
     this._wire.choke()
-    // this._wireUnchoke = this._wire.unchoke
-    // this._wire.unchoke = function () {
-    //   debug('fake unchoke called')
-    //   // noop
-    //   // Other parts of the webtorrent code will try to unchoke it
-    // }
   }
 
   wt_ilp.prototype.unchoke = function () {
     debug('unchoke' + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0, 8) + ')' : ''))
     this.amForceChoking = false
-    // if (this._wireUnchoke) {
-    //   this._wire.unchoke = this._wireUnchoke
-    //   this._wireUnchoke = null
-    // }
-    // this._wire.unchoke()
   }
 
   wt_ilp.prototype._interceptRequests = function () {
@@ -147,12 +154,8 @@ module.exports = function (opts) {
     }
   }
 
-  wt_ilp.prototype._send = function (dict, trailer) {
-    var buf = bencode.encode(dict)
-    if (Buffer.isBuffer(trailer)) {
-      buf = Buffer.concat([buf, trailer])
-    }
-    this._wire.extended('wt_ilp', buf)
+  wt_ilp.prototype._send = function (dict) {
+    this._wire.extended('wt_ilp', bencode.encode(dict))
   }
 
   wt_ilp.prototype.sendPaymentRequest = function (amount) {
@@ -171,6 +174,14 @@ module.exports = function (opts) {
     this._send({
       msg_type: 1,
       amount: amount.toString()
+    })
+  }
+
+  wt_ilp.prototype.sendLicense = function (license) {
+    debug('Sending license: ' + license)
+    this._send({
+      msg_type: 2,
+      license: license
     })
   }
 
