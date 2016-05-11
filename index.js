@@ -25,7 +25,6 @@ module.exports = function (opts) {
     debug('wt_ilp instantiated')
 
     this._wire = wire
-    this._infoHash = null
 
     this.publicKey = opts.publicKey
     this.account = opts.account
@@ -60,12 +59,7 @@ module.exports = function (opts) {
   wt_ilp.prototype.name = 'wt_ilp'
 
   wt_ilp.prototype.onHandshake = function (infoHash, peerId, extensions) {
-    this._infoHash = infoHash
-
-    if (!extensions.extended) {
-      // Peer does not support extensions
-      this._wire.destroy()
-    }
+    // noop
   }
 
   wt_ilp.prototype.onExtendedHandshake = function (handshake) {
