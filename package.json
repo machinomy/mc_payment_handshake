@@ -1,15 +1,14 @@
 {
-  "name": "wt_ilp",
+  "name": "mc_payment_handshake",
   "version": "1.0.0",
-  "description": "ILP BitTorrent Protocol Extension",
+  "description": "BitTorrent Protocol Extension for micropayments by Machinomy",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "lint": "npm run standard"
   },
   "keywords": [
-    "ilp",
-    "interledger",
+    "machinomy",
     "bittorrent",
     "webtorrent",
     "micropayment"
