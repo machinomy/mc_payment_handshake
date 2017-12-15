@@ -3,11 +3,11 @@
 const EventEmitter = require('events').EventEmitter
 const inherits = require('inherits')
 const bencode = require('bencode')
-const debug = require('debug')('mc_ph')
+const debug = require('debug')('mc_payment_handshake')
 
 /**
  * Returns a bittorrent extension
- * @param {String} opts.address Ethereum address
+ * @param {String} opts.ethereumAddress Ethereum address
  * @return {BitTorrent Extension}
  */
 module.exports = function (opts) {
@@ -20,22 +20,17 @@ module.exports = function (opts) {
     opts = {}
   }
 
-  inherits(mc_ph, EventEmitter)
+  inherits(mc_payment_handshake, EventEmitter)
 
-  function mc_ph (wire) {
+  function mc_payment_handshake (wire, ethereumAddress) {
     EventEmitter.call(this)
-
     debug('mc_payment_handshake instantiated')
 
     this._wire = wire
 
-    this.address = opts.address
+    this.ethereumAddress = ethereumAddress
     this.host = opts.host
     this.port = opts.port
-
-    if (!this.address) {
-      throw new Error('Must instantiate mc_payment_handshake with an ethereum address')
-    }
 
     // Peer fields will be set once the extended handshake is received
     this.peerAddress = null
@@ -45,21 +40,21 @@ module.exports = function (opts) {
     this.amForceChoking = false
 
     // Add fields to extended handshake, which will be sent to peer
-    this._wire.extendedHandshake.mc_ph_address = this.address
+    this._wire.extendedHandshake.ethereumAddress = this.ethereumAddress
 
     debug('Extended handshake to send:', this._wire.extendedHandshake)
 
     this._interceptRequests()
   }
 
-  mc_ph.prototype.name = 'mc_ph'
+  mc_payment_handshake.prototype.name = 'mc_payment_handshake'
 
-  mc_ph.prototype.onHandshake = function (infoHash, peerId, extensions) {
+  mc_payment_handshake.prototype.onHandshake = function (infoHash, peerId, extensions) {
     // noop
   }
 
-  mc_ph.prototype.onExtendedHandshake = function (handshake) {
-    if (!handshake.m || !handshake.m.mc_ph) {
+  mc_payment_handshake.prototype.onExtendedHandshake = function (handshake) {
+    if (!handshake.m || !handshake.m.mc_payment_handshake) {
       return this.emit('mc_payment_handshake_not_supported', new Error('Peer does not support mc_payment_handshake'))
     }
 
@@ -68,11 +63,11 @@ module.exports = function (opts) {
     }
 
     this.emit('mc_payment_handshake', {
-      address: this.peerAddress
+      ethereumAddress: this.ethereumAddress
     })
   }
 
-  mc_ph.prototype.onMessage = function (buf) {
+  mc_payment_handshake.prototype.onMessage = function (buf) {
     let dict
     try {
       const str = buf.toString()
@@ -82,11 +77,11 @@ module.exports = function (opts) {
       // drop invalid messages
       return
     }
-    const address = Buffer.isBuffer(dict.address) ? dict.address.toString('utf8') : ''
+    const ethereumAddress = Buffer.isBuffer(dict.ethereumAddress) ? dict.ethereumAddress.toString('utf8') : ''
     switch (dict.msg_type) {
       case MessageType.SendAddress:
-        debug('Got opposite address: ' + address + ' from ' + this.peerHost + ':' + this.peerPort)
-        this.emit('got_address', address)
+        debug('Got opposite ethereumAddress: ' + ethereumAddress + ' from ' + this.peerHost + ':' + this.peerPort)
+        this.emit('got_address', ethereumAddress)
         break
       default:
         debug('Got unknown message: ', dict)
@@ -94,18 +89,18 @@ module.exports = function (opts) {
     }
   }
 
-  mc_ph.prototype.forceChoke = function () {
+  mc_payment_handshake.prototype.forceChoke = function () {
     debug('force choke peer ' + this.peerHost + ':' + this.peerPort)
     this.amForceChoking = true
     this._wire.choke()
   }
 
-  mc_ph.prototype.unchoke = function () {
+  mc_payment_handshake.prototype.unchoke = function () {
     debug('unchoke' + this.peerHost + ':' + this.peerPort)
     this.amForceChoking = false
   }
 
-  mc_ph.prototype._interceptRequests = function () {
+  mc_payment_handshake.prototype._interceptRequests = function () {
     const _this = this
     const _onRequest = this._wire._onRequest
     this._wire._onRequest = function (index, offset, length) {
@@ -124,17 +119,17 @@ module.exports = function (opts) {
     }
   }
 
-  mc_ph.prototype._send = function (dict) {
+  mc_payment_handshake.prototype._send = function (dict) {
     this._wire.extended('mc_payment_handshake', bencode.encode(dict))
   }
 
-  mc_ph.prototype.sendAddress = function (address) {
-    debug('Send address to ' + this.peerHost + ':' + this.peerPort)
+  mc_payment_handshake.prototype.sendAddress = function () {
+    debug('Send ethereumAddress to ' + this.peerHost + ':' + this.peerPort)
     this._send({
       msg_type: MessageType.SendAddress,
-      address: address
+      ethereumAddress: this.ethereumAddress
     })
   }
 
-  return mc_ph
+  return mc_payment_handshake
 }
