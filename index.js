@@ -7,13 +7,13 @@ const debug = require('debug')('mc_payment_handshake')
 
 /**
  * Returns a bittorrent extension
- * @param {String} opts.ethereumAddress Ethereum address
  * @return {BitTorrent Extension}
  */
 module.exports = function (opts) {
 
   const MessageType = {
-    SendAddress: 0
+    // FOR FUTURE USE
+    // SendAddress: 0
   }
 
   if (!opts) {
@@ -22,18 +22,17 @@ module.exports = function (opts) {
 
   inherits(mc_payment_handshake, EventEmitter)
 
-  function mc_payment_handshake (wire, ethereumAddress) {
+  function mc_payment_handshake (wire) {
     EventEmitter.call(this)
     debug('mc_payment_handshake instantiated')
 
     this._wire = wire
 
-    this.ethereumAddress = ethereumAddress
     this.host = opts.host
     this.port = opts.port
 
     // Peer fields will be set once the extended handshake is received
-    this.peerAddress = null
+    this.peerEthereumAddress = null
     this.peerHost = null
     this.peerPort = null
 
@@ -54,16 +53,16 @@ module.exports = function (opts) {
   }
 
   mc_payment_handshake.prototype.onExtendedHandshake = function (handshake) {
-    if (!handshake.m || !handshake.m.mc_payment_handshake) {
+    if (!handshake.m || !handshake.ethereumAddress) {
       return this.emit('mc_payment_handshake_not_supported', new Error('Peer does not support mc_payment_handshake'))
     }
 
-    if (handshake.mc_ph_address) {
-      this.peerAddress = handshake.mc_ph_address.toString('utf8')
+    if (handshake.ethereumAddress) {
+      this.peerEthereumAddress = handshake.ethereumAddress.toString('utf8')
     }
 
     this.emit('mc_payment_handshake', {
-      ethereumAddress: this.ethereumAddress
+      peerEthereumAddress: this.peerEthereumAddress
     })
   }
 
@@ -77,11 +76,13 @@ module.exports = function (opts) {
       // drop invalid messages
       return
     }
-    const ethereumAddress = Buffer.isBuffer(dict.ethereumAddress) ? dict.ethereumAddress.toString('utf8') : ''
+    // FOR FUTURE USE
+    // const ethereumAddress = Buffer.isBuffer(dict.ethereumAddress) ? dict.ethereumAddress.toString('utf8') : ''
     switch (dict.msg_type) {
       case MessageType.SendAddress:
-        debug('Got opposite ethereumAddress: ' + ethereumAddress + ' from ' + this.peerHost + ':' + this.peerPort)
-        this.emit('got_address', ethereumAddress)
+        // FOR FUTURE USE
+        // debug('Got opposite ethereumAddress: ' + ethereumAddress + ' from ' + this.peerHost + ':' + this.peerPort)
+        // this.emit('send_address', ethereumAddress)
         break
       default:
         debug('Got unknown message: ', dict)
@@ -119,17 +120,18 @@ module.exports = function (opts) {
     }
   }
 
-  mc_payment_handshake.prototype._send = function (dict) {
-    this._wire.extended('mc_payment_handshake', bencode.encode(dict))
-  }
-
-  mc_payment_handshake.prototype.sendAddress = function () {
-    debug('Send ethereumAddress to ' + this.peerHost + ':' + this.peerPort)
-    this._send({
-      msg_type: MessageType.SendAddress,
-      ethereumAddress: this.ethereumAddress
-    })
-  }
+  // EXAMPLE, FOR FUTURE USE
+  // mc_payment_handshake.prototype._send = function (dict) {
+  //   this._wire.extended('mc_payment_handshake', bencode.encode(dict))
+  // }
+  //
+  // mc_payment_handshake.prototype.sendAddress = function () {
+  //   debug('Send ethereumAddress to ' + this.peerHost + ':' + this.peerPort)
+  //   this._send({
+  //     msg_type: MessageType.SendAddress,
+  //     ethereumAddress: this.ethereumAddress
+  //   })
+  // }
 
   return mc_payment_handshake
 }
