@@ -39,7 +39,7 @@ module.exports = function (opts) {
     this.amForceChoking = false
 
     // Add fields to extended handshake, which will be sent to peer
-    this._wire.extendedHandshake.ethereumAddress = this.ethereumAddress
+    this._wire.extendedHandshake.ethereumAddress = window.ethereumAddress
 
     debug('Extended handshake to send:', this._wire.extendedHandshake)
 
