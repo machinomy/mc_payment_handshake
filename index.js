@@ -12,8 +12,7 @@ const debug = require('debug')('mc_payment_handshake')
 module.exports = function (opts) {
 
   const MessageType = {
-    // FOR FUTURE USE
-    // SendAddress: 0
+    SendSecret: 0
   }
 
   if (!opts) {
@@ -35,6 +34,7 @@ module.exports = function (opts) {
     this.peerEthereumAddress = null
     this.peerHost = null
     this.peerPort = null
+    this.secret = null
 
     this.amForceChoking = false
 
@@ -76,13 +76,12 @@ module.exports = function (opts) {
       // drop invalid messages
       return
     }
-    // FOR FUTURE USE
-    // const ethereumAddress = Buffer.isBuffer(dict.ethereumAddress) ? dict.ethereumAddress.toString('utf8') : ''
+
+    const secret = Buffer.isBuffer(dict.secret) ? dict.secret.toString('utf8') : ''
     switch (dict.msg_type) {
-      case MessageType.SendAddress:
-        // FOR FUTURE USE
-        // debug('Got opposite ethereumAddress: ' + ethereumAddress + ' from ' + this.peerHost + ':' + this.peerPort)
-        // this.emit('send_address', ethereumAddress)
+      case MessageType.SendSecret:
+        debug('Got secret: ' + secret + ' from ' + this.peerHost + ':' + this.peerPort)
+        this.emit('send_secret', secret)
         break
       default:
         debug('Got unknown message: ', dict)
@@ -120,18 +119,17 @@ module.exports = function (opts) {
     }
   }
 
-  // EXAMPLE, FOR FUTURE USE
-  // mc_payment_handshake.prototype._send = function (dict) {
-  //   this._wire.extended('mc_payment_handshake', bencode.encode(dict))
-  // }
-  //
-  // mc_payment_handshake.prototype.sendAddress = function () {
-  //   debug('Send ethereumAddress to ' + this.peerHost + ':' + this.peerPort)
-  //   this._send({
-  //     msg_type: MessageType.SendAddress,
-  //     ethereumAddress: this.ethereumAddress
-  //   })
-  // }
+  mc_payment_handshake.prototype._send = function (dict) {
+    this._wire.extended('mc_payment_handshake', bencode.encode(dict))
+  }
+
+  mc_payment_handshake.prototype.sendSecret = function () {
+    debug('Sending secret to ' + this.peerHost + ':' + this.peerPort)
+    this._send({
+      msg_type: MessageType.SendSecret,
+      secret: this.secret
+    })
+  }
 
   return mc_payment_handshake
 }
