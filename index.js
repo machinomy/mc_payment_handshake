@@ -12,7 +12,9 @@ const debug = require('debug')('mc_payment_handshake')
 module.exports = function (opts) {
 
   const MessageType = {
-    SendSecret: 0
+    SendSecret: 0,
+    SendApprove: 1,
+    SendReject: 2
   }
 
   if (!opts) {
@@ -77,11 +79,19 @@ module.exports = function (opts) {
       return
     }
 
-    const secret = Buffer.isBuffer(dict.secret) ? dict.secret.toString('utf8') : ''
+    const secret = dict.secret
     switch (dict.msg_type) {
       case MessageType.SendSecret:
         debug('Got secret: ' + secret + ' from ' + this.peerHost + ':' + this.peerPort)
         this.emit('send_secret', secret)
+        break
+      case MessageType.SendApprove:
+        debug('Got approve from ' + this.peerHost + ':' + this.peerPort)
+        this.emit('send_approve')
+        break
+      case MessageType.SendReject:
+        debug('Got reject from ' + this.peerHost + ':' + this.peerPort)
+        this.emit('send_reject')
         break
       default:
         debug('Got unknown message: ', dict)
@@ -123,11 +133,25 @@ module.exports = function (opts) {
     this._wire.extended('mc_payment_handshake', bencode.encode(dict))
   }
 
-  mc_payment_handshake.prototype.sendSecret = function () {
+  mc_payment_handshake.prototype.sendSecret = function (secret) {
     debug('Sending secret to ' + this.peerHost + ':' + this.peerPort)
     this._send({
       msg_type: MessageType.SendSecret,
-      secret: this.secret
+      secret: secret
+    })
+  }
+
+  mc_payment_handshake.prototype.sendApprove = function () {
+    debug('Sending approve to ' + this.peerHost + ':' + this.peerPort)
+    this._send({
+      msg_type: MessageType.SendApprove
+    })
+  }
+
+  mc_payment_handshake.prototype.sendReject = function () {
+    debug('Sending reject to ' + this.peerHost + ':' + this.peerPort)
+    this._send({
+      msg_type: MessageType.SendReject
     })
   }
 
