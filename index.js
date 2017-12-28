@@ -3,88 +3,72 @@
 const EventEmitter = require('events').EventEmitter
 const inherits = require('inherits')
 const bencode = require('bencode')
-const debug = require('debug')('wt_ilp')
+const debug = require('debug')('mc_payment_handshake')
 
 /**
  * Returns a bittorrent extension
- * @param {String} opts.account Address of five-bells-wallet
- * @param {String} opts.publicKey Ed25519 public key
- * @param {String} [opts.license] payment-license
  * @return {BitTorrent Extension}
  */
 module.exports = function (opts) {
+
+  const MessageType = {
+    SendSecret: 0,
+    SendApprove: 1,
+    SendReject: 2
+  }
+
   if (!opts) {
     opts = {}
   }
 
-  inherits(wt_ilp, EventEmitter)
+  inherits(mc_payment_handshake, EventEmitter)
 
-  function wt_ilp (wire) {
+  function mc_payment_handshake (wire) {
     EventEmitter.call(this)
-
-    debug('wt_ilp instantiated')
+    debug('mc_payment_handshake instantiated')
 
     this._wire = wire
 
-    this.publicKey = opts.publicKey
-    this.account = opts.account
-    this.license = opts.license
-
-    if (!this.publicKey) {
-      throw new Error('Must instantiate wt_ilp with a publicKey')
-    }
-    if (!this.account) {
-      throw new Error('Must instantiate wt_ilp with an ILP account')
-    }
+    this.host = opts.host
+    this.port = opts.port
 
     // Peer fields will be set once the extended handshake is received
-    this.peerAccount = null
-    this.peerPublicKey = null
-    this.peerLicense = null
+    this.peerEthereumAddress = null
+    this.peerHost = null
+    this.peerPort = null
+    this.secret = null
 
     this.amForceChoking = false
 
     // Add fields to extended handshake, which will be sent to peer
-    this._wire.extendedHandshake.ilp_public_key = this.publicKey
-    this._wire.extendedHandshake.ilp_account = this.account
-    if (this.license) {
-      this._wire.extendedHandshake.ilp_license = this.license
-    }
+    this._wire.extendedHandshake.ethereumAddress = window.ethereumAddress
 
     debug('Extended handshake to send:', this._wire.extendedHandshake)
 
     this._interceptRequests()
   }
 
-  wt_ilp.prototype.name = 'wt_ilp'
+  mc_payment_handshake.prototype.name = 'mc_payment_handshake'
 
-  wt_ilp.prototype.onHandshake = function (infoHash, peerId, extensions) {
+  mc_payment_handshake.prototype.onHandshake = function (infoHash, peerId, extensions) {
     // noop
   }
 
-  wt_ilp.prototype.onExtendedHandshake = function (handshake) {
-    if (!handshake.m || !handshake.m.wt_ilp) {
-      return this.emit('warning', new Error('Peer does not support wt_ilp'))
+  mc_payment_handshake.prototype.onExtendedHandshake = function (handshake) {
+    if (!handshake.m || !handshake.ethereumAddress) {
+      return this.emit('mc_payment_handshake_not_supported', new Error('Peer does not support mc_payment_handshake'))
     }
 
-    if (handshake.ilp_account) {
-      this.peerAccount = handshake.ilp_account.toString('utf8')
-    }
-    if (handshake.ilp_public_key) {
-      this.peerPublicKey = handshake.ilp_public_key.toString('utf8')
-    }
-    if (handshake.ilp_license) {
-      this.peerLicense = handshake.ilp_license.toString('utf8')
+    if (handshake.ethereumAddress) {
+      this.peerEthereumAddress = handshake.ethereumAddress.toString('utf8')
     }
 
-    this.emit('ilp_handshake', {
-      account: this.peerAccount,
-      publicKey: this.peerPublicKey,
-      license: this.peerLicense
+    this.emit('mc_payment_handshake', {
+      peerEthereumAddress: this.peerEthereumAddress
     })
   }
 
-  wt_ilp.prototype.onMessage = function (buf) {
+  mc_payment_handshake.prototype.onMessage = function (buf) {
     let dict
     try {
       const str = buf.toString()
@@ -94,23 +78,20 @@ module.exports = function (opts) {
       // drop invalid messages
       return
     }
-    const amount = Buffer.isBuffer(dict.amount) ? dict.amount.toString('utf8') : 0
+
+    const secret = dict.secret
     switch (dict.msg_type) {
-      // request for funds (denominated in the peer's ledger's asset)
-      // { msg_type: 0, amount: 10 }
-      case 0:
-        debug('Got payment request for: ' + amount + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0, 8) + ')' : ''))
-        this.emit('payment_request', amount)
+      case MessageType.SendSecret:
+        debug('Got secret: ' + secret + ' from ' + this.peerHost + ':' + this.peerPort)
+        this.emit('send_secret', secret)
         break
-      case 1:
-        debug('Peer is complaining that the price is too high, suggested price: ' + amount)
-        this.emit('payment_request_too_high', amount)
+      case MessageType.SendApprove:
+        debug('Got approve from ' + this.peerHost + ':' + this.peerPort)
+        this.emit('send_approve')
         break
-      case 2:
-        const license = dict.license.toString('utf8')
-        debug('Got peer license: ' + dict.license.toString('utf8'))
-        this.peerLicense = license
-        this.emit('license', license)
+      case MessageType.SendReject:
+        debug('Got reject from ' + this.peerHost + ':' + this.peerPort)
+        this.emit('send_reject')
         break
       default:
         debug('Got unknown message: ', dict)
@@ -118,18 +99,18 @@ module.exports = function (opts) {
     }
   }
 
-  wt_ilp.prototype.forceChoke = function () {
-    debug('force choke peer' + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0, 8) + ')' : ''))
+  mc_payment_handshake.prototype.forceChoke = function () {
+    debug('force choke peer ' + this.peerHost + ':' + this.peerPort)
     this.amForceChoking = true
     this._wire.choke()
   }
 
-  wt_ilp.prototype.unchoke = function () {
-    debug('unchoke' + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0, 8) + ')' : ''))
+  mc_payment_handshake.prototype.unchoke = function () {
+    debug('unchoke' + this.peerHost + ':' + this.peerPort)
     this.amForceChoking = false
   }
 
-  wt_ilp.prototype._interceptRequests = function () {
+  mc_payment_handshake.prototype._interceptRequests = function () {
     const _this = this
     const _onRequest = this._wire._onRequest
     this._wire._onRequest = function (index, offset, length) {
@@ -148,36 +129,31 @@ module.exports = function (opts) {
     }
   }
 
-  wt_ilp.prototype._send = function (dict) {
-    this._wire.extended('wt_ilp', bencode.encode(dict))
+  mc_payment_handshake.prototype._send = function (dict) {
+    this._wire.extended('mc_payment_handshake', bencode.encode(dict))
   }
 
-  wt_ilp.prototype.sendPaymentRequest = function (amount) {
-    debug('Send payment request for: ' + amount.toString() + (this.peerPublicKey ? ' (' + this.peerPublicKey.slice(0, 8) + ')' : ''))
+  mc_payment_handshake.prototype.sendSecret = function (secret) {
+    debug('Sending secret to ' + this.peerHost + ':' + this.peerPort)
     this._send({
-      msg_type: 0,
-      amount: amount.toString()
+      msg_type: MessageType.SendSecret,
+      secret: secret
     })
   }
 
-  wt_ilp.prototype.sendPaymentRequestTooHigh = function (amount) {
-    if (!amount) {
-      amount = 0
-    }
-    debug('Telling peer price is too high, suggesting price: ' + amount.toString())
+  mc_payment_handshake.prototype.sendApprove = function () {
+    debug('Sending approve to ' + this.peerHost + ':' + this.peerPort)
     this._send({
-      msg_type: 1,
-      amount: amount.toString()
+      msg_type: MessageType.SendApprove
     })
   }
 
-  wt_ilp.prototype.sendLicense = function (license) {
-    debug('Sending license: ' + license)
+  mc_payment_handshake.prototype.sendReject = function () {
+    debug('Sending reject to ' + this.peerHost + ':' + this.peerPort)
     this._send({
-      msg_type: 2,
-      license: license
+      msg_type: MessageType.SendReject
     })
   }
 
-  return wt_ilp
+  return mc_payment_handshake
 }
