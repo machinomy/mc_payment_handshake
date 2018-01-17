@@ -80,18 +80,19 @@ module.exports = function (opts) {
     }
 
     const secret = dict.secret
+    const data = dict.data
     switch (dict.msg_type) {
       case MessageType.SendSecret:
         debug('Got secret: ' + secret + ' from ' + this.peerHost + ':' + this.peerPort)
         this.emit('send_secret', secret)
         break
       case MessageType.SendApprove:
-        debug('Got approve from ' + this.peerHost + ':' + this.peerPort)
-        this.emit('send_approve')
+        debug('Got approve ' + data + ' from ' + this.peerHost + ':' + this.peerPort)
+        this.emit('send_approve', data)
         break
       case MessageType.SendReject:
-        debug('Got reject from ' + this.peerHost + ':' + this.peerPort)
-        this.emit('send_reject')
+        debug('Got reject ' + data + ' from ' + this.peerHost + ':' + this.peerPort)
+        this.emit('send_reject', data)
         break
       default:
         debug('Got unknown message: ', dict)
@@ -141,17 +142,19 @@ module.exports = function (opts) {
     })
   }
 
-  mc_payment_handshake.prototype.sendApprove = function () {
+  mc_payment_handshake.prototype.sendApprove = function (data) {
     debug('Sending approve to ' + this.peerHost + ':' + this.peerPort)
     this._send({
-      msg_type: MessageType.SendApprove
+      msg_type: MessageType.SendApprove,
+      data: data
     })
   }
 
-  mc_payment_handshake.prototype.sendReject = function () {
+  mc_payment_handshake.prototype.sendReject = function (data) {
     debug('Sending reject to ' + this.peerHost + ':' + this.peerPort)
     this._send({
-      msg_type: MessageType.SendReject
+      msg_type: MessageType.SendReject,
+      data: data
     })
   }
 
